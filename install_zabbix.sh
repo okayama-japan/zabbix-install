@@ -1,56 +1,51 @@
 #!/bin/bash
 
-# =========================================
-# 一键安装 Zabbix 6.4 (Server + Web + Agent)
-# 适用于 Ubuntu 20.04 / 22.04
-# =========================================
+# Zabbix 一键安装脚本 (Ubuntu 22.04)
+# 作者: 你的名字
+# GitHub: https://github.com/你的用户名/你的仓库
 
-# 配置项
-DB_PASS="Zabbix123!"   # 数据库密码，可修改
-ZABBIX_VERSION="6.4"
-UBUNTU_VERSION=$(lsb_release -rs)
+set -e
 
-echo "=== 更新系统 ==="
-apt update && apt upgrade -y
+echo "更新系统..."
+sudo apt update && sudo apt upgrade -y
 
-echo "=== 安装必要软件 ==="
-apt install wget curl gnupg2 software-properties-common lsb-release unzip -y
+echo "安装依赖..."
+sudo apt install -y wget curl gnupg2 software-properties-common lsb-release
 
-echo "=== 安装 MariaDB ==="
-apt install mariadb-server mariadb-client -y
-systemctl enable --now mariadb
+echo "添加 Zabbix 官方仓库..."
+wget https://repo.zabbix.com/zabbix/6.4/ubuntu/pool/main/z/zabbix-release/zabbix-release_6.4-1+ubuntu$(lsb_release -rs)_all.deb
+sudo dpkg -i zabbix-release_6.4-1+ubuntu$(lsb_release -rs)_all.deb
+sudo apt update
 
-echo "=== 创建 Zabbix 数据库和用户 ==="
-mysql -e "CREATE DATABASE zabbix character set utf8mb4 collate utf8mb4_bin;"
-mysql -e "CREATE USER 'zabbix'@'localhost' IDENTIFIED BY '$DB_PASS';"
-mysql -e "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'localhost';"
-mysql -e "FLUSH PRIVILEGES;"
+echo "安装 Zabbix Server + Frontend + Agent + MySQL"
+sudo apt install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-sql-scripts zabbix-agent mysql-server
 
-echo "=== 导入 Zabbix 官方仓库 ==="
-wget https://repo.zabbix.com/zabbix/$ZABBIX_VERSION/ubuntu/pool/main/z/zabbix-release/zabbix-release_${ZABBIX_VERSION}-1+ubuntu${UBUNTU_VERSION}_all.deb
-dpkg -i zabbix-release_${ZABBIX_VERSION}-1+ubuntu${UBUNTU_VERSION}_all.deb
-apt update
+echo "配置数据库..."
+DB_ROOT_PASS="root123"        # 你可以修改
+DB_ZABBIX="zabbix"
+DB_USER="zabbix"
+DB_PASS="zabbix123"
 
-echo "=== 安装 Zabbix Server + Web + Agent ==="
-apt install zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent -y
+sudo mysql -uroot <<EOF
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DB_ROOT_PASS';
+CREATE DATABASE $DB_ZABBIX CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
+GRANT ALL PRIVILEGES ON $DB_ZABBIX.* TO '$DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+EOF
 
-echo "=== 导入初始数据库 ==="
-zcat /usr/share/doc/zabbix-server-mysql*/create.sql.gz | mysql -u zabbix -p"$DB_PASS" zabbix
+echo "导入初始数据库..."
+sudo zcat /usr/share/doc/zabbix-sql-scripts/mysql/server.sql.gz | mysql -u$DB_USER -p$DB_PASS $DB_ZABBIX
 
-echo "=== 配置 Zabbix Server ==="
-sed -i "s/# DBPassword=/DBPassword=$DB_PASS/" /etc/zabbix/zabbix_server.conf
+echo "配置 Zabbix Server 数据库连接..."
+sudo sed -i "s/# DBPassword=/DBPassword=$DB_PASS/" /etc/zabbix/zabbix_server.conf
 
-echo "=== 启动服务 ==="
-systemctl restart zabbix-server zabbix-agent apache2
-systemctl enable zabbix-server zabbix-agent apache2
+echo "启动并启用服务..."
+sudo systemctl restart zabbix-server zabbix-agent apache2
+sudo systemctl enable zabbix-server zabbix-agent apache2
 
-echo "=== 配置防火墙 ==="
-ufw allow 80/tcp
-ufw allow 10050/tcp
-ufw allow 10051/tcp
-ufw reload
+echo "安装完成！"
+IP=$(hostname -I | awk '{print $1}')
+echo "请在浏览器访问：http://$IP/zabbix"
+echo "默认 Zabbix 登录: Admin / zabbix"
 
-echo "=== 安装完成！ ==="
-echo "请在浏览器访问：http://$(curl -s ifconfig.me)/zabbix"
-echo "默认账号：admin"
-echo "默认密码：zabbix"
